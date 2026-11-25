@@ -147,3 +147,14 @@ W środowisku produkcyjnym warto rozważyć:
 - centralne zarządzanie sekretami.
 
 Ostateczna konfiguracja powinna zostać dostosowana do dostępnej infrastruktury, przewidywanego obciążenia oraz wymagań biznesowych.
+
+### Sprzątanie po teście
+Usunięcie klastra Minikube wraz ze wszystkimi danymi:
+```bash
+minikube delete -p pg-lab
+```
+
+Kontener testowy uruchamiany poza klastrem (scenariusz z `pg_access_external: true`) należy usunąć osobno:
+```bash
+docker rm -f database-connection-check-external
+```
