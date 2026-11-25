@@ -1,0 +1,13 @@
+---
+ext_app_env:
+  PGHOST: "{{ ext_app_node_ip.stdout | trim }}"
+  PGPORT: "{{ pg_nodeport | string }}"
+  PGDATABASE: "{{ test_db_name }}"
+  PGUSER: "{{ test_db_user }}"
+  PGPASSWORD: "{{ test_db_password }}"
+  PGSSLMODE: "{{ pg_client_sslmode }}"
+  PGCONNECT_TIMEOUT: "{{ ext_app_connect_timeout | string }}"
+
+ext_app_config_hash: "{{ (ext_app_env | to_json ~ ext_app_image ~ ext_app_script_dir) | hash('sha256') }}"
+
+ext_app_exec: "docker exec {{ ext_app_container_name }} sh /app/db-check.sh"

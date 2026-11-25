@@ -1,0 +1,59 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ cnpg_cluster_name }}-access
+  namespace: {{ cnpg_cluster_namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: {{ cnpg_cluster_name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ cnpg_cluster_name }}
+      ports:
+        - port: 5432
+          protocol: TCP
+        - port: 8000
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ cnpg_operator_namespace }}
+      ports:
+        - port: 5432
+          protocol: TCP
+        - port: 8000
+          protocol: TCP
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              {{ pg_access_label_key }}: "{{ pg_access_label_value }}"
+      ports:
+        - port: 5432
+          protocol: TCP
+{% if pg_access_external %}
+    - from:
+{% for cidr in cnpg_nodeport_client_cidrs %}
+        - ipBlock:
+            cidr: {{ cidr }}
+{% endfor %}
+{% for node in cnpg_nodes %}
+{% for addr in node.status.addresses if addr.type == 'InternalIP' %}
+        - ipBlock:
+            cidr: {{ addr.address }}/32
+{% endfor %}
+{% set tunnel = (node.metadata.annotations | default({})).get('projectcalico.org/IPv4IPIPTunnelAddr') %}
+{% if tunnel %}
+        - ipBlock:
+            cidr: {{ tunnel }}/32
+{% endif %}
+{% endfor %}
+      ports:
+        - port: 5432
+          protocol: TCP
+{% endif %}

@@ -1,0 +1,13 @@
+---
+- name: Deploy PostgreSQL stack on Kubernetes
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - cnpg-operator
+    - pg-cluster
+    - cnpg-test-db
+    - pg-backup
+    - database-connection-check
+    - replica-watch
+    - role: database-connection-check-external
+      when: pg_access_external

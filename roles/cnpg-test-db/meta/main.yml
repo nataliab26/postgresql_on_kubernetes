@@ -1,0 +1,6 @@
+---
+galaxy_info:
+  role_name: cnpg_test_db
+  description: Create test database, user, table and seed data in the CNPG cluster
+  min_ansible_version: "2.14"
+dependencies: []

@@ -1,0 +1,54 @@
+---
+- name: Get cluster nodes
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ cnpg_kube_context }} get nodes -o json"
+  register: cnpg_nodes_json
+  changed_when: false
+
+- name: Get Calico IP pools
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ cnpg_kube_context }} get ippools.crd.projectcalico.org -o json"
+  register: cnpg_ippools_json
+  changed_when: false
+  failed_when: false
+
+- name: Collect node and pod addresses
+  ansible.builtin.set_fact:
+    cnpg_nodes: "{{ (cnpg_nodes_json.stdout | from_json)['items'] }}"
+    cnpg_node_ips: >-
+      {{ (cnpg_nodes_json.stdout | from_json)['items']
+         | map(attribute='status.addresses') | flatten
+         | selectattr('type', 'equalto', 'InternalIP')
+         | map(attribute='address') | list }}
+    cnpg_pod_cidrs: >-
+      {{ ((cnpg_ippools_json.stdout | from_json)['items'] | map(attribute='spec.cidr') | list)
+         if (cnpg_ippools_json.rc == 0 and (cnpg_ippools_json.stdout | from_json)['items'])
+         else ((cnpg_nodes_json.stdout | from_json)['items'] | map(attribute='spec.podCIDRs') | flatten | list) }}
+
+- name: Fail when pod address pool is unknown
+  ansible.builtin.assert:
+    that: cnpg_pod_cidrs | length > 0
+    fail_msg: "Nie udało się ustalić puli adresów podów (Calico IPPool ani spec.podCIDRs)."
+
+- name: Get minikube docker network gateway
+  ansible.builtin.command:
+    cmd: "docker network inspect {{ kube_context }} -f '{{ '{{' }}range .IPAM.Config{{ '}}' }}{{ '{{' }}.Gateway{{ '}}' }}{{ '{{' }}end{{ '}}' }}'"
+  register: cnpg_docker_gateway
+  changed_when: false
+  when:
+    - pg_access_external
+    - pg_nodeport_client_cidrs is not defined
+
+- name: Set NodePort client addresses
+  ansible.builtin.set_fact:
+    cnpg_nodeport_client_cidrs: >-
+      {{ pg_nodeport_client_cidrs if pg_nodeport_client_cidrs is defined
+         else [cnpg_docker_gateway.stdout | trim ~ '/32'] }}
+  when: pg_access_external
+
+- name: Show discovered source addresses
+  ansible.builtin.debug:
+    msg:
+      - "Pod CIDR: {{ cnpg_pod_cidrs }}"
+      - "Node IPs: {{ cnpg_node_ips }}"
+      - "NodePort clients: {{ cnpg_nodeport_client_cidrs | default('n/a') }}"

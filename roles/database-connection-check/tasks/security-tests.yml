@@ -1,0 +1,68 @@
+---
+- name: Security test - connection uses TLS
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ kube_context }} -n {{ app_namespace }}
+      exec deploy/{{ app_allowed_name }} --
+      psql -X -w -tA -c "SELECT ssl, version FROM pg_stat_ssl WHERE pid = pg_backend_pid()"
+  register: sec_tls
+  changed_when: false
+  failed_when: sec_tls.rc != 0 or not sec_tls.stdout.startswith('t|TLS')
+
+- name: Security test - connection must be rejected
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ kube_context }} -n {{ app_namespace }}
+      exec deploy/{{ app_allowed_name }} --
+      env {{ item.env }} psql -X -w -c "SELECT 1"
+  loop:
+    - name: without TLS
+      env: PGSSLMODE=disable
+      expect: no encryption
+    - name: wrong password
+      env: PGPASSWORD=wrong-password
+      expect: password authentication failed
+    - name: test_user to another database
+      env: PGDATABASE=postgres
+      expect: rejects connection
+    - name: superuser postgres over network
+      env: PGUSER=postgres PGPASSWORD=any
+      expect: rejects connection
+    - name: bootstrap user app over network
+      env: PGUSER=app PGDATABASE=app PGPASSWORD=any
+      expect: rejects connection
+  loop_control:
+    label: "{{ item.name }}"
+  register: sec_reject
+  changed_when: false
+  failed_when: sec_reject.rc == 0 or item.expect not in sec_reject.stderr
+
+- name: Security test - SQL operation must be denied for test_user
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ kube_context }} -n {{ app_namespace }}
+      exec deploy/{{ app_allowed_name }} --
+      psql -X -w -v ON_ERROR_STOP=1 -c "{{ item.sql }}"
+  loop:
+    - name: UPDATE users
+      sql: "UPDATE users SET email = email WHERE false"
+    - name: CREATE TABLE
+      sql: "CREATE TABLE security_test (id int)"
+    - name: CREATE TEMP TABLE
+      sql: "CREATE TEMP TABLE security_test (id int)"
+  loop_control:
+    label: "{{ item.name }}"
+  register: sec_sql
+  changed_when: false
+  failed_when: sec_sql.rc == 0 or 'permission denied' not in sec_sql.stderr
+
+- name: Show security test results
+  ansible.builtin.debug:
+    msg: >-
+      {{ ['TLS: ' ~ sec_tls.stdout]
+         + (sec_reject.results | map(attribute='item.name')
+            | zip(sec_reject.results | map(attribute='stderr_lines') | map('first') | map('regex_replace', '^.*failed: ', ''))
+            | map('join', ' -> ') | list)
+         + (sec_sql.results | map(attribute='item.name')
+            | zip(sec_sql.results | map(attribute='stderr_lines') | map('first'))
+            | map('join', ' -> ') | list) }}

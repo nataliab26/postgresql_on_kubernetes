@@ -1,0 +1,77 @@
+---
+- name: Get minikube node IP
+  ansible.builtin.command:
+    cmd: "minikube ip --profile={{ kube_context }}"
+  register: ext_app_node_ip
+  changed_when: false
+
+- name: Inspect existing container
+  ansible.builtin.command:
+    cmd: "docker container inspect {{ ext_app_container_name }}"
+  register: ext_app_inspect
+  changed_when: false
+  failed_when: false
+
+- name: Read existing container state
+  ansible.builtin.set_fact:
+    ext_app_exists: "{{ ext_app_inspect.rc == 0 }}"
+    ext_app_up_to_date: "{{ ext_app_inspect.rc == 0 and ((ext_app_inspect.stdout | from_json)[0].Config.Labels or {}).get('config-hash') == ext_app_config_hash }}"
+    ext_app_running: "{{ ext_app_inspect.rc == 0 and (ext_app_inspect.stdout | from_json)[0].State.Running }}"
+
+- name: Remove outdated container
+  ansible.builtin.command:
+    cmd: "docker rm -f {{ ext_app_container_name }}"
+  when: ext_app_exists and not ext_app_up_to_date
+
+- name: Start external application container
+  ansible.builtin.command:
+    argv: >-
+      {{ ['docker', 'run', '-d',
+          '--name', ext_app_container_name,
+          '--network', 'host',
+          '--restart', 'unless-stopped',
+          '--label', 'config-hash=' ~ ext_app_config_hash,
+          '-v', ext_app_script_dir ~ ':/app:ro',
+          '--entrypoint', 'sleep']
+         + (ext_app_env.keys() | map('regex_replace', '^', '--env=') | list)
+         + [ext_app_image, 'infinity'] }}
+  environment: "{{ ext_app_env }}"
+  no_log: true
+  when: not ext_app_up_to_date
+
+- name: Start stopped container
+  ansible.builtin.command:
+    cmd: "docker start {{ ext_app_container_name }}"
+  when: ext_app_up_to_date and not ext_app_running
+
+- name: Smoke test - connection
+  ansible.builtin.command:
+    cmd: "{{ ext_app_exec }} --check"
+  register: ext_app_check
+  changed_when: false
+
+- name: Smoke test - insert record
+  ansible.builtin.command:
+    cmd: "{{ ext_app_exec }} --add smoke_test_ext smoke_test_ext@example.com"
+  register: ext_app_insert
+  changed_when: false
+
+- name: Smoke test - list records
+  ansible.builtin.command:
+    cmd: "{{ ext_app_exec }} --list"
+  register: ext_app_list
+  changed_when: false
+  failed_when: ext_app_list.rc != 0 or 'smoke_test_ext' not in ext_app_list.stdout
+
+- name: Smoke test - delete record
+  ansible.builtin.command:
+    cmd: "{{ ext_app_exec }} --delete {{ ext_app_insert.stdout | trim }}"
+  changed_when: false
+
+- name: Show smoke test results
+  ansible.builtin.debug:
+    msg:
+      - "Connected from Docker to {{ ext_app_node_ip.stdout | trim }}:{{ pg_nodeport }}"
+      - "{{ ext_app_check.stdout_lines }}"
+      - "Inserted test record id={{ ext_app_insert.stdout | trim }} (deleted afterwards)"
+      - "{{ ext_app_list.stdout_lines }}"

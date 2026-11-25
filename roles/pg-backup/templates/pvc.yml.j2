@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ pg_backup_name }}-storage
+  namespace: {{ pg_backup_namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ pg_backup_storage_class }}
+  resources:
+    requests:
+      storage: {{ pg_backup_storage_size }}

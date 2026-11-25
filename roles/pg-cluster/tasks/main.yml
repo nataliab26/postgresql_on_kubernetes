@@ -1,0 +1,17 @@
+---
+- name: Prepare cluster namespace
+  ansible.builtin.import_tasks: namespace.yml
+
+- name: Discover network source addresses
+  ansible.builtin.import_tasks: network-sources.yml
+
+- name: Restrict database access to selected pods
+  ansible.builtin.include_tasks: access-restricted.yml
+  when: pg_access_restricted
+
+- name: Deploy PostgreSQL cluster
+  ansible.builtin.import_tasks: cluster.yml
+
+- name: Expose database outside the cluster
+  ansible.builtin.include_tasks: access-external.yml
+  when: pg_access_external

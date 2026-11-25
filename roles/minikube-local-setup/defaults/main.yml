@@ -1,0 +1,9 @@
+---
+minikube_profile: pg-lab
+minikube_driver: docker
+minikube_nodes: 3
+minikube_cpus: 2
+minikube_memory: 3072
+minikube_cni: calico #scenariusz 2
+minikube_addons:
+  - storage-provisioner-rancher

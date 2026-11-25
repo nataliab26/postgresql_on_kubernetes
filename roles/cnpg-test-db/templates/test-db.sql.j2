@@ -1,0 +1,67 @@
+SET password_encryption = 'scram-sha-256';
+
+SELECT 'CREATE DATABASE {{ test_db_name }}'
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '{{ test_db_name }}')
+\gexec
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{{ test_db_user }}') THEN
+    CREATE USER {{ test_db_user }};
+    RAISE NOTICE 'ROLE_CREATED';
+  END IF;
+END
+$$;
+ALTER USER {{ test_db_user }} WITH PASSWORD '{{ test_db_password }}';
+
+GRANT CONNECT ON DATABASE {{ test_db_name }} TO {{ test_db_user }};
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{{ replica_watch_db_user }}') THEN
+    CREATE USER {{ replica_watch_db_user }};
+    RAISE NOTICE 'ROLE_CREATED';
+  END IF;
+END
+$$;
+ALTER USER {{ replica_watch_db_user }} WITH PASSWORD '{{ replica_watch_db_password }}';
+GRANT CONNECT ON DATABASE {{ test_db_name }} TO {{ replica_watch_db_user }};
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{{ backup_db_user }}') THEN
+    CREATE USER {{ backup_db_user }};
+    RAISE NOTICE 'ROLE_CREATED';
+  END IF;
+END
+$$;
+ALTER USER {{ backup_db_user }} WITH PASSWORD '{{ backup_db_password }}';
+GRANT CONNECT ON DATABASE {{ test_db_name }} TO {{ backup_db_user }};
+GRANT pg_read_all_data TO {{ backup_db_user }};
+
+REVOKE ALL ON DATABASE {{ test_db_name }} FROM PUBLIC;
+SELECT 'GRANT CONNECT ON DATABASE {{ test_db_name }} TO cnpg_metrics_exporter'
+WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cnpg_metrics_exporter')
+\gexec
+
+\connect {{ test_db_name }}
+
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    username VARCHAR(100) NOT NULL,
+    email VARCHAR(255) NOT NULL
+);
+
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+
+GRANT USAGE ON SCHEMA public TO {{ test_db_user }};
+GRANT SELECT, INSERT, DELETE ON TABLE public.users TO {{ test_db_user }};
+
+INSERT INTO users (username, email)
+SELECT 'user_' || u.suffix,
+       'user_' || u.suffix || '@example.com'
+FROM (
+    SELECT substr(md5(random()::text), 1, 8) AS suffix
+    FROM generate_series(1, {{ test_db_seed_rows }})
+) AS u
+WHERE NOT EXISTS (SELECT 1 FROM users);

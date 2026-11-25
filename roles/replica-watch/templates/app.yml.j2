@@ -1,0 +1,55 @@
+{% set script = lookup('ansible.builtin.file', 'replica-watch.sh') %}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ replica_watch_name }}-script
+  namespace: {{ replica_watch_namespace }}
+data:
+  replica-watch.sh: |
+    {{ script | indent(4) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ replica_watch_name }}
+  namespace: {{ replica_watch_namespace }}
+  labels:
+    app: {{ replica_watch_name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ replica_watch_name }}
+  template:
+    metadata:
+      labels:
+        app: {{ replica_watch_name }}
+        {{ pg_access_label_key }}: "{{ pg_access_label_value }}"
+      annotations:
+        checksum/script: "{{ script | hash('sha256') }}"
+        checksum/secret: "{{ (replica_watch_db_host ~ test_db_name ~ replica_watch_db_user ~ replica_watch_db_password ~ pg_client_sslmode) | hash('sha256') }}"
+    spec:
+      containers:
+        - name: app
+          image: {{ replica_watch_image }}
+          command: ["sleep", "infinity"]
+          env:
+            - name: TZ
+              value: {{ replica_watch_timezone }}
+          envFrom:
+            - secretRef:
+                name: {{ replica_watch_name }}-db
+          volumeMounts:
+            - name: script
+              mountPath: /app
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+      volumes:
+        - name: script
+          configMap:
+            name: {{ replica_watch_name }}-script
+            defaultMode: 0755

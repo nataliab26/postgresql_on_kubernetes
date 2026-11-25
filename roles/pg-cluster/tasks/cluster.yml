@@ -1,0 +1,28 @@
+---
+- name: Apply PostgreSQL Cluster manifest
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ cnpg_kube_context }} apply -f -"
+    stdin: "{{ lookup('ansible.builtin.template', 'pg-cluster.yml.j2') }}"
+  register: cnpg_cluster_apply
+  changed_when: "'unchanged' not in cnpg_cluster_apply.stdout"
+
+- name: Wait for PostgreSQL Cluster to be ready
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ cnpg_kube_context }}
+      -n {{ cnpg_cluster_namespace }}
+      wait cluster/{{ cnpg_cluster_name }}
+      --for=condition=Ready --timeout={{ cnpg_cluster_ready_timeout }}
+  changed_when: false
+
+- name: Get PostgreSQL pods
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ cnpg_kube_context }}
+      -n {{ cnpg_cluster_namespace }} get pods -o wide
+  register: cnpg_pods_out
+  changed_when: false
+
+- name: Show PostgreSQL pods
+  ansible.builtin.debug:
+    var: cnpg_pods_out.stdout_lines

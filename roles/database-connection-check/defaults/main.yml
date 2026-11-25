@@ -1,0 +1,11 @@
+---
+app_name: database-connection-check
+app_namespace: sandbox
+app_allowed_name: "{{ app_name }}-allowed"
+
+app_image: postgres:18-alpine
+
+app_db_host: "{{ pg_cluster_name }}-rw.{{ pg_cluster_namespace }}.svc.cluster.local"
+app_db_port: 5432
+
+app_denied_connect_timeout: 5

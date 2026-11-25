@@ -1,0 +1,20 @@
+---
+pg_backup_name: pg-backup
+pg_backup_namespace: backup
+
+pg_backup_image: postgres:18
+pg_backup_uid: 999
+
+pg_backup_db_host: "{{ pg_cluster_name }}-rw.{{ pg_cluster_namespace }}.svc.cluster.local"
+pg_backup_db_port: 5432
+
+pg_backup_schedule: "0 2 * * *"
+pg_backup_timezone: Europe/Warsaw
+pg_backup_retention_days: 7
+
+pg_backup_storage_size: 2Gi
+pg_backup_storage_class: local-path
+
+pg_backup_run_on_deploy: true
+pg_backup_restore_test: true
+pg_backup_restore_db: "{{ test_db_name }}_restore"

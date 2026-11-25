@@ -1,0 +1,94 @@
+{% set script = lookup('ansible.builtin.file', 'db-check.sh') %}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ app_name }}-script
+  namespace: {{ app_namespace }}
+data:
+  db-check.sh: |
+    {{ script | indent(4) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ app_name }}
+  namespace: {{ app_namespace }}
+  labels:
+    app: {{ app_name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ app_name }}
+  template:
+    metadata:
+      labels:
+        app: {{ app_name }}
+      annotations:
+        checksum/script: "{{ script | hash('sha256') }}"
+        checksum/secret: "{{ (app_db_host ~ test_db_name ~ test_db_user ~ test_db_password ~ pg_client_sslmode) | hash('sha256') }}"
+    spec:
+      containers:
+        - name: app
+          image: {{ app_image }}
+          command: ["sleep", "infinity"]
+          envFrom:
+            - secretRef:
+                name: {{ app_name }}-db
+          volumeMounts:
+            - name: script
+              mountPath: /app
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+      volumes:
+        - name: script
+          configMap:
+            name: {{ app_name }}-script
+            defaultMode: 0755
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ app_allowed_name }}
+  namespace: {{ app_namespace }}
+  labels:
+    app: {{ app_allowed_name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ app_allowed_name }}
+  template:
+    metadata:
+      labels:
+        app: {{ app_allowed_name }}
+        {{ pg_access_label_key }}: "{{ pg_access_label_value }}"
+      annotations:
+        checksum/script: "{{ script | hash('sha256') }}"
+        checksum/secret: "{{ (app_db_host ~ test_db_name ~ test_db_user ~ test_db_password ~ pg_client_sslmode) | hash('sha256') }}"
+    spec:
+      containers:
+        - name: app
+          image: {{ app_image }}
+          command: ["sleep", "infinity"]
+          envFrom:
+            - secretRef:
+                name: {{ app_name }}-db
+          volumeMounts:
+            - name: script
+              mountPath: /app
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+      volumes:
+        - name: script
+          configMap:
+            name: {{ app_name }}-script
+            defaultMode: 0755

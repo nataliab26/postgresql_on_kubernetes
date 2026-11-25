@@ -1,0 +1,7 @@
+---
+- name: Apply database NetworkPolicy
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ cnpg_kube_context }} apply -f -"
+    stdin: "{{ lookup('ansible.builtin.template', 'db-networkpolicy.yml.j2') }}"
+  register: cnpg_netpol_apply
+  changed_when: "'unchanged' not in cnpg_netpol_apply.stdout"

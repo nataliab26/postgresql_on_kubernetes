@@ -1,0 +1,90 @@
+---
+- name: Create application namespace
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ kube_context }} apply -f -"
+    stdin: "{{ lookup('ansible.builtin.template', 'namespace.yml.j2') }}"
+  register: app_ns_apply
+  changed_when: "'unchanged' not in app_ns_apply.stdout"
+
+- name: Create database credentials secret
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ kube_context }} apply -f -"
+    stdin: "{{ lookup('ansible.builtin.template', 'secret.yml.j2') }}"
+  register: app_secret_apply
+  changed_when: "'unchanged' not in app_secret_apply.stdout"
+  no_log: true
+
+- name: Deploy application (ConfigMap + Deployment)
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ kube_context }} apply -f -"
+    stdin: "{{ lookup('ansible.builtin.template', 'app.yml.j2') }}"
+  register: app_apply
+  changed_when: app_apply.stdout_lines | reject('search', 'unchanged$') | list | length > 0
+
+- name: Wait for application rollout
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ kube_context }} -n {{ app_namespace }}
+      rollout status deployment/{{ app_name }} --timeout=180s
+  changed_when: false
+
+- name: Wait for application copy with DB access rollout
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ kube_context }} -n {{ app_namespace }}
+      rollout status deployment/{{ app_allowed_name }} --timeout=180s
+  changed_when: false
+
+- name: Smoke test - connection
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ kube_context }} -n {{ app_namespace }}
+      exec deploy/{{ app_allowed_name }} -- /app/db-check.sh --check
+  register: app_check
+  changed_when: false
+
+- name: Smoke test - insert record
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ kube_context }} -n {{ app_namespace }}
+      exec deploy/{{ app_allowed_name }} -- /app/db-check.sh --add smoke_test smoke_test@example.com
+  register: app_insert
+  changed_when: false
+
+- name: Smoke test - list records
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ kube_context }} -n {{ app_namespace }}
+      exec deploy/{{ app_allowed_name }} -- /app/db-check.sh --list
+  register: app_list
+  changed_when: false
+  failed_when: app_list.rc != 0 or 'smoke_test' not in app_list.stdout
+
+- name: Smoke test - delete record
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ kube_context }} -n {{ app_namespace }}
+      exec deploy/{{ app_allowed_name }} -- /app/db-check.sh --delete {{ app_insert.stdout | trim }}
+  changed_when: false
+
+- name: Negative test - application without label must not reach the database
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ kube_context }} -n {{ app_namespace }}
+      exec deploy/{{ app_name }} --
+      env PGCONNECT_TIMEOUT={{ app_denied_connect_timeout }} /app/db-check.sh --check
+  register: app_denied
+  changed_when: false
+  failed_when: app_denied.rc == 0 or 'timeout expired' not in app_denied.stderr
+  when: pg_access_restricted  # bez NetworkPolicy każdy pod ma dostęp
+
+- name: Security tests
+  ansible.builtin.import_tasks: security-tests.yml
+
+- name: Show smoke test results
+  ansible.builtin.debug:
+    msg:
+      - "{{ app_check.stdout_lines }}"
+      - "Inserted test record id={{ app_insert.stdout | trim }} (deleted afterwards)"
+      - "{{ app_list.stdout_lines }}"
+      - "{{ app_name }} (no access label): {{ app_denied.stderr_lines | last if pg_access_restricted else 'not tested (pg_access_restricted: false)' }}"

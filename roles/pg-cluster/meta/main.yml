@@ -1,0 +1,6 @@
+---
+galaxy_info:
+  role_name: pg_cluster
+  description: Deploy a CNPG PostgreSQL cluster with optional access scenarios
+  min_ansible_version: "2.14"
+dependencies: []

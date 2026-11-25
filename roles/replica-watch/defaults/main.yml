@@ -1,0 +1,10 @@
+---
+replica_watch_name: replica-watch
+replica_watch_namespace: sandbox
+
+replica_watch_image: postgres:18-alpine
+
+replica_watch_db_host: "{{ pg_cluster_name }}-rw.{{ pg_cluster_namespace }}.svc.cluster.local"
+replica_watch_db_port: 5432
+
+replica_watch_timezone: Europe/Warsaw

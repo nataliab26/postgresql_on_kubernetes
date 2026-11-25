@@ -1,0 +1,6 @@
+---
+cnpg_kube_context: "{{ kube_context }}"
+
+cnpg_version: "1.30.2"
+cnpg_manifest_url: "https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-{{ cnpg_version.split('.')[:2] | join('.') }}/releases/cnpg-{{ cnpg_version }}.yaml"
+cnpg_operator_image: "ghcr.io/cloudnative-pg/cloudnative-pg:{{ cnpg_version }}"

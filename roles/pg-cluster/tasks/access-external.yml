@@ -1,0 +1,7 @@
+---
+- name: Apply PostgreSQL NodePort service
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ cnpg_kube_context }} apply -f -"
+    stdin: "{{ lookup('ansible.builtin.template', 'pg-nodeport.yml.j2') }}"
+  register: cnpg_nodeport_apply
+  changed_when: "'unchanged' not in cnpg_nodeport_apply.stdout"

@@ -1,0 +1,25 @@
+---
+- name: Get installed CNPG operator image
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ cnpg_kube_context }}
+      -n {{ cnpg_operator_namespace }} get deployment cnpg-controller-manager
+      -o jsonpath={.spec.template.spec.containers[0].image}
+  register: cnpg_installed_image
+  changed_when: false
+  failed_when: false
+
+- name: Install or upgrade CNPG operator to {{ cnpg_version }}
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ cnpg_kube_context }}
+      apply --server-side -f {{ cnpg_manifest_url }}
+  when: cnpg_installed_image.stdout != cnpg_operator_image
+
+- name: Wait for CNPG operator to be ready
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ cnpg_kube_context }}
+      -n {{ cnpg_operator_namespace }}
+      rollout status deployment/cnpg-controller-manager --timeout=300s
+  changed_when: false

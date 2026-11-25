@@ -1,0 +1,12 @@
+---
+cnpg_kube_context: "{{ kube_context }}"
+
+cnpg_cluster_name: "{{ pg_cluster_name }}"
+cnpg_cluster_namespace: "{{ pg_cluster_namespace }}"
+cnpg_cluster_instances: 3
+cnpg_cluster_image: ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie
+cnpg_cluster_primary_update_strategy: unsupervised
+cnpg_cluster_primary_update_method: switchover
+cnpg_cluster_storage_size: 1Gi
+cnpg_cluster_storage_class: local-path
+cnpg_cluster_ready_timeout: 600s

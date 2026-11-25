@@ -1,0 +1,76 @@
+{% set script = lookup('ansible.builtin.file', 'backup.sh') %}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ pg_backup_name }}-script
+  namespace: {{ pg_backup_namespace }}
+data:
+  backup.sh: |
+    {{ script | indent(4) }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ pg_backup_name }}
+  namespace: {{ pg_backup_namespace }}
+spec:
+  schedule: "{{ pg_backup_schedule }}"
+  timeZone: {{ pg_backup_timezone }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app: {{ pg_backup_name }}
+            {{ pg_access_label_key }}: "{{ pg_access_label_value }}"
+          annotations:
+            checksum/script: "{{ script | hash('sha256') }}"
+            checksum/secret: "{{ (pg_backup_db_host ~ test_db_name ~ backup_db_user ~ backup_db_password ~ pg_client_sslmode) | hash('sha256') }}"
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: {{ pg_backup_uid }}
+            runAsGroup: {{ pg_backup_uid }}
+            fsGroup: {{ pg_backup_uid }}
+          containers:
+            - name: backup
+              image: {{ pg_backup_image }}
+              command: ["/scripts/backup.sh"]
+              env:
+                - name: BACKUP_DIR
+                  value: /backup
+                - name: BACKUP_RETENTION_DAYS
+                  value: "{{ pg_backup_retention_days }}"
+                - name: TZ
+                  value: {{ pg_backup_timezone }}
+              envFrom:
+                - secretRef:
+                    name: {{ pg_backup_name }}-db
+              securityContext:
+                allowPrivilegeEscalation: false
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                - name: backup
+                  mountPath: /backup
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+          volumes:
+            - name: script
+              configMap:
+                name: {{ pg_backup_name }}-script
+                defaultMode: 0755
+            - name: backup
+              persistentVolumeClaim:
+                claimName: {{ pg_backup_name }}-storage

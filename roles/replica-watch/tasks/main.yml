@@ -1,0 +1,46 @@
+---
+- name: Create replica-watch namespace
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ kube_context }} apply -f -"
+    stdin: "{{ lookup('ansible.builtin.template', 'namespace.yml.j2') }}"
+  register: replica_watch_ns_apply
+  changed_when: "'unchanged' not in replica_watch_ns_apply.stdout"
+
+- name: Create replica-watch credentials secret
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ kube_context }} apply -f -"
+    stdin: "{{ lookup('ansible.builtin.template', 'secret.yml.j2') }}"
+  register: replica_watch_secret_apply
+  changed_when: "'unchanged' not in replica_watch_secret_apply.stdout"
+  no_log: true
+
+- name: Deploy replica-watch (ConfigMap + Deployment)
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ kube_context }} apply -f -"
+    stdin: "{{ lookup('ansible.builtin.template', 'app.yml.j2') }}"
+  register: replica_watch_apply
+  changed_when: replica_watch_apply.stdout_lines | reject('search', 'unchanged$') | list | length > 0
+
+- name: Wait for replica-watch rollout
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ kube_context }} -n {{ replica_watch_namespace }}
+      rollout status deployment/{{ replica_watch_name }} --timeout=180s
+  changed_when: false
+
+- name: Smoke test - query primary through -rw service
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ kube_context }} -n {{ replica_watch_namespace }}
+      exec deploy/{{ replica_watch_name }} --
+      psql -X -tA -F | -c "SELECT pg_is_in_recovery(), coalesce(nullif(replace(substr(current_setting('primary_slot_name'), 7), '_', '-'), ''), host(inet_server_addr()))"
+  register: replica_watch_smoke
+  changed_when: false
+  failed_when: >-
+    replica_watch_smoke.rc != 0
+    or not replica_watch_smoke.stdout.startswith('f|')
+    or replica_watch_smoke.stdout == 'f|'
+
+- name: Show replica-watch smoke test result
+  ansible.builtin.debug:
+    msg: "{{ replica_watch_name }} -> {{ replica_watch_db_host }}: {{ replica_watch_smoke.stdout }}"

@@ -1,0 +1,6 @@
+---
+galaxy_info:
+  role_name: replica_watch
+  description: Deploy a pod with a script that shows which pod is the PostgreSQL primary
+  min_ansible_version: "2.14"
+dependencies: []

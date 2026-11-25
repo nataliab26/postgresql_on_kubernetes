@@ -1,0 +1,104 @@
+---
+- name: Refuse to restore over the source database
+  ansible.builtin.assert:
+    that: pg_backup_restore_db != test_db_name
+    fail_msg: "pg_backup_restore_db nie może być bazą źródłową {{ test_db_name }}"
+
+- name: Start helper pod with backup volume
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ kube_context }} apply -f -"
+    stdin: "{{ lookup('ansible.builtin.template', 'restore-helper.yml.j2') }}"
+  changed_when: true
+
+- name: Run restore test
+  block:
+    - name: Wait for helper pod
+      ansible.builtin.command:
+        cmd: >-
+          kubectl --context={{ kube_context }} -n {{ pg_backup_namespace }}
+          wait pod/{{ pg_backup_name }}-helper --for=condition=Ready --timeout=180s
+      changed_when: false
+
+    - name: Find latest backup file
+      ansible.builtin.command:
+        cmd: >-
+          kubectl --context={{ kube_context }} -n {{ pg_backup_namespace }}
+          exec {{ pg_backup_name }}-helper -- sh -c 'ls -1t /backup/*.dump | head -n 1'
+      register: pg_backup_latest
+      changed_when: false
+      failed_when: pg_backup_latest.rc != 0 or pg_backup_latest.stdout == ''
+
+    - name: Find primary PostgreSQL pod
+      ansible.builtin.command:
+        cmd: >-
+          kubectl --context={{ kube_context }} -n {{ pg_cluster_namespace }}
+          get pods -l cnpg.io/cluster={{ pg_cluster_name }},cnpg.io/instanceRole=primary
+          -o jsonpath={.items[0].metadata.name}
+      register: pg_backup_primary
+      changed_when: false
+      failed_when: pg_backup_primary.rc != 0 or pg_backup_primary.stdout == ''
+
+    - name: Recreate restore database
+      ansible.builtin.command:
+        cmd: >-
+          kubectl --context={{ kube_context }} -n {{ pg_cluster_namespace }}
+          exec {{ pg_backup_primary.stdout }} -c postgres --
+          psql -X -v ON_ERROR_STOP=1
+          -c "DROP DATABASE IF EXISTS {{ pg_backup_restore_db }} WITH (FORCE)"
+          -c "CREATE DATABASE {{ pg_backup_restore_db }}"
+      changed_when: true
+
+    - name: Restore latest backup
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          kubectl --context={{ kube_context }} -n {{ pg_backup_namespace }}
+          exec {{ pg_backup_name }}-helper -- cat {{ pg_backup_latest.stdout | quote }}
+          | kubectl --context={{ kube_context }} -n {{ pg_cluster_namespace }}
+          exec -i {{ pg_backup_primary.stdout }} -c postgres --
+          pg_restore --no-owner --exit-on-error -d {{ pg_backup_restore_db }}
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Count rows in source and restored database
+      ansible.builtin.command:
+        cmd: >-
+          kubectl --context={{ kube_context }} -n {{ pg_cluster_namespace }}
+          exec {{ pg_backup_primary.stdout }} -c postgres --
+          psql -X -tA -d {{ item }} -c "SELECT count(*) FROM users"
+      loop:
+        - "{{ test_db_name }}"
+        - "{{ pg_backup_restore_db }}"
+      register: pg_backup_counts
+      changed_when: false
+
+    - name: Check restored data
+      ansible.builtin.assert:
+        that: pg_backup_counts.results[1].stdout | int > 0
+        fail_msg: "Odtworzona tabela users jest pusta"
+
+    - name: Show restore test result
+      ansible.builtin.debug:
+        msg:
+          - "Backup file: {{ pg_backup_latest.stdout }}"
+          - "Rows in {{ test_db_name }}.users: {{ pg_backup_counts.results[0].stdout }}"
+          - "Rows in {{ pg_backup_restore_db }}.users: {{ pg_backup_counts.results[1].stdout }}"
+          - "{{ 'Row counts match' if pg_backup_counts.results[0].stdout == pg_backup_counts.results[1].stdout
+                else 'Row counts differ (writes after backup?)' }}"
+
+  always:
+    - name: Drop restore database
+      ansible.builtin.command:
+        cmd: >-
+          kubectl --context={{ kube_context }} -n {{ pg_cluster_namespace }}
+          exec {{ pg_backup_primary.stdout }} -c postgres --
+          psql -X -c "DROP DATABASE IF EXISTS {{ pg_backup_restore_db }} WITH (FORCE)"
+      when: pg_backup_primary.stdout | default('') != ''
+      changed_when: true
+
+    - name: Delete helper pod
+      ansible.builtin.command:
+        cmd: >-
+          kubectl --context={{ kube_context }} -n {{ pg_backup_namespace }}
+          delete pod {{ pg_backup_name }}-helper --ignore-not-found
+      changed_when: true

@@ -1,0 +1,12 @@
+---
+- name: Check whether cluster namespace exists
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ cnpg_kube_context }} get namespace {{ cnpg_cluster_namespace }}"
+  register: cnpg_ns_check
+  changed_when: false
+  failed_when: false
+
+- name: Create cluster namespace
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ cnpg_kube_context }} create namespace {{ cnpg_cluster_namespace }}"
+  when: cnpg_ns_check.rc != 0

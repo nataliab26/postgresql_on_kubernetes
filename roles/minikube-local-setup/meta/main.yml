@@ -1,0 +1,6 @@
+---
+galaxy_info:
+  role_name: minikube_local_setup
+  description: Start a local multi-node minikube cluster for the PostgreSQL lab
+  min_ansible_version: "2.14"
+dependencies: []

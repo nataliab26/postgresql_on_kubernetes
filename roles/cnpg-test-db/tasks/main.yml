@@ -1,0 +1,37 @@
+---
+- name: Find primary PostgreSQL pod
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ kube_context }} -n {{ pg_cluster_namespace }}
+      get pods -l cnpg.io/cluster={{ pg_cluster_name }},cnpg.io/instanceRole=primary
+      -o jsonpath={.items[0].metadata.name}
+  register: test_db_primary
+  changed_when: false
+  failed_when: test_db_primary.rc != 0 or test_db_primary.stdout == ''
+
+- name: Create test database, user, table and seed data
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ kube_context }} -n {{ pg_cluster_namespace }}
+      exec -i {{ test_db_primary.stdout }} -c postgres --
+      psql -v ON_ERROR_STOP=1
+    stdin: "{{ lookup('ansible.builtin.template', 'test-db.sql.j2') }}"
+  register: test_db_sql
+  no_log: true
+  changed_when: >-
+    'CREATE DATABASE' in test_db_sql.stdout
+    or 'ROLE_CREATED' in test_db_sql.stderr
+    or ('INSERT 0 ' ~ test_db_seed_rows) in test_db_sql.stdout
+
+- name: Count rows in users table
+  ansible.builtin.command:
+    cmd: >-
+      kubectl --context={{ kube_context }} -n {{ pg_cluster_namespace }}
+      exec {{ test_db_primary.stdout }} -c postgres --
+      psql -d {{ test_db_name }} -tAc "SELECT count(*) FROM users"
+  register: test_db_count
+  changed_when: false
+
+- name: Show row count
+  ansible.builtin.debug:
+    msg: "{{ test_db_name }}.users contains {{ test_db_count.stdout }} rows"

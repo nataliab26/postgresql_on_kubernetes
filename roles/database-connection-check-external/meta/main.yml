@@ -1,0 +1,6 @@
+---
+galaxy_info:
+  role_name: database_connection_check_external
+  description: Run a Docker container outside the cluster that reads/writes test_db through the NodePort service
+  min_ansible_version: "2.14"
+dependencies: []

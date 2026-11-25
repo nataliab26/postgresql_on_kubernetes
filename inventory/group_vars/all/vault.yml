@@ -1,0 +1,8 @@
+---
+# Hasła projektu. Docelowo plik będzie zaszyfrowany:
+#   ansible-vault encrypt inventory/group_vars/all/vault.yml
+# Zmienne mają prefiks vault_, a vars.yml przypisuje je do nazw używanych w rolach.
+
+vault_test_db_password: test123
+vault_replica_watch_db_password: watch123
+vault_backup_db_password: backup123

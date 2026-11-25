@@ -1,0 +1,76 @@
+---
+- name: Create backup namespace
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ kube_context }} apply -f -"
+    stdin: "{{ lookup('ansible.builtin.template', 'namespace.yml.j2') }}"
+  register: pg_backup_ns_apply
+  changed_when: "'unchanged' not in pg_backup_ns_apply.stdout"
+
+- name: Create backup credentials secret
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ kube_context }} apply -f -"
+    stdin: "{{ lookup('ansible.builtin.template', 'secret.yml.j2') }}"
+  register: pg_backup_secret_apply
+  changed_when: "'unchanged' not in pg_backup_secret_apply.stdout"
+  no_log: true
+
+- name: Create backup volume
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ kube_context }} apply -f -"
+    stdin: "{{ lookup('ansible.builtin.template', 'pvc.yml.j2') }}"
+  register: pg_backup_pvc_apply
+  changed_when: "'unchanged' not in pg_backup_pvc_apply.stdout"
+
+- name: Deploy backup CronJob (ConfigMap + CronJob)
+  ansible.builtin.command:
+    cmd: "kubectl --context={{ kube_context }} apply -f -"
+    stdin: "{{ lookup('ansible.builtin.template', 'cronjob.yml.j2') }}"
+  register: pg_backup_cronjob_apply
+  changed_when: pg_backup_cronjob_apply.stdout_lines | reject('search', 'unchanged$') | list | length > 0
+
+- name: Run backup now
+  when: pg_backup_run_on_deploy
+  block:
+    - name: Create on-demand backup job
+      ansible.builtin.command:
+        cmd: >-
+          kubectl --context={{ kube_context }} -n {{ pg_backup_namespace }}
+          create job --from=cronjob/{{ pg_backup_name }}
+          {{ pg_backup_name }}-ansible-{{ now(utc=true, fmt='%Y%m%d%H%M%S') }}
+          -o jsonpath={.metadata.name}
+      register: pg_backup_job
+      changed_when: true
+
+    - name: Wait for backup job to finish
+      ansible.builtin.command:
+        cmd: >-
+          kubectl --context={{ kube_context }} -n {{ pg_backup_namespace }}
+          get job {{ pg_backup_job.stdout }}
+          -o 'jsonpath={.status.conditions[?(@.status=="True")].type}'
+      register: pg_backup_job_status
+      changed_when: false
+      until: "'Complete' in pg_backup_job_status.stdout or 'Failed' in pg_backup_job_status.stdout"
+      retries: 60
+      delay: 5
+
+    - name: Get backup job logs
+      ansible.builtin.command:
+        cmd: >-
+          kubectl --context={{ kube_context }} -n {{ pg_backup_namespace }}
+          logs job/{{ pg_backup_job.stdout }}
+      register: pg_backup_job_logs
+      changed_when: false
+      failed_when: false
+
+    - name: Show backup job logs
+      ansible.builtin.debug:
+        var: pg_backup_job_logs.stdout_lines
+
+    - name: Fail when backup job failed
+      ansible.builtin.fail:
+        msg: "Backup job {{ pg_backup_job.stdout }} failed: {{ pg_backup_job_logs.stderr_lines + pg_backup_job_logs.stdout_lines }}"
+      when: "'Complete' not in pg_backup_job_status.stdout"
+
+- name: Test restore of the latest backup
+  ansible.builtin.include_tasks: restore-test.yml
+  when: pg_backup_restore_test

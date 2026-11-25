@@ -1,0 +1,51 @@
+---
+# Wartości współdzielone przez kilka ról (cnpg-operator, pg-cluster, cnpg-test-db,
+# database-connection-check, replica-watch). Trzymamy je w jednym miejscu, żeby np. nazwa
+# namespace'u klastra albo nazwa użytkownika test_user nie rozjechały się między rolami.
+
+kube_context: pg-lab
+
+# Namespace operatora CNPG. Potrzebny roli cnpg-operator (instalacja)
+# i roli pg-cluster (NetworkPolicy wpuszcza ruch od operatora).
+cnpg_operator_namespace: cnpg-system
+
+# Scenariusze dostępu do bazy.
+# Obie flagi false = scenariusz 1 (dostęp dla wszystkich podów w klastrze).
+pg_access_restricted: true   # scenariusz 2: NetworkPolicy, wymaga CNI z obsługą NetworkPolicy (Calico)
+pg_access_external: true     # scenariusz 3: serwis NodePort
+
+# Klaster PostgreSQL zarządzany przez CloudNativePG
+pg_cluster_name: pg-cluster
+pg_cluster_namespace: database
+
+# Hasła są w vault.yml (zmienne vault_*), tutaj tylko odwołania do nich.
+# Dzięki temu grep po nazwie zmiennej pokazuje, skąd pochodzi wartość,
+# nawet gdy vault.yml jest zaszyfrowany.
+
+# Użytkownik i baza testowa.
+test_db_name: test_db
+test_db_user: test_user
+test_db_password: "{{ vault_test_db_password }}"
+# Użytkownik dla roli replica-watch. Osobny od test_user (zasada najmniejszych
+# uprawnień): ma tylko CONNECT do test_db, bez dostępu do tabel.
+replica_watch_db_user: replica_watch
+replica_watch_db_password: "{{ vault_replica_watch_db_password }}"
+# Użytkownik roli pg-backup (pg_dump). Tylko odczyt: CONNECT do test_db
+# i członkostwo w pg_read_all_data, bez praw zapisu i bez superusera.
+# Hasło w vault.yml (docelowo zaszyfrowany ansible-vault; w produkcji Vault).
+backup_db_user: backup_user
+backup_db_password: "{{ vault_backup_db_password }}"
+# Tryb TLS klientów (zmienna PGSSLMODE). Serwer i tak odrzuca połączenia bez
+# TLS (pg_hba: hostssl), a `require` sprawia, że klient też nie spróbuje bez TLS.
+# require szyfruje, ale NIE weryfikuje certyfikatu serwera. W produkcji:
+# verify-full + CA klastra (Secret <klaster>-ca) + łączenie po nazwie DNS.
+pg_client_sslmode: require
+
+# Pody z tą etykietą mają dostęp do bazy (scenariusz 2)
+pg_access_label_key: db-access
+pg_access_label_value: "allowed"
+
+# Port NodePort, pod którym baza jest dostępna spoza klastra (scenariusz 3).
+# Używają go pg-cluster (Service) i database-connection-check-external (klient).
+# Musi mieścić się w zakresie NodePort Kubernetesa: 30000-32767.
+pg_nodeport: 30432

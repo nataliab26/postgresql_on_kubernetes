@@ -1,0 +1,8 @@
+---
+ext_app_container_name: database-connection-check-external
+
+ext_app_image: postgres:18-alpine
+
+ext_app_script_dir: "{{ (role_path ~ '/../database-connection-check/files') | realpath }}"
+
+ext_app_connect_timeout: 5

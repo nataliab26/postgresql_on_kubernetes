@@ -1,0 +1,6 @@
+---
+- name: Prepare local Kubernetes environment
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - minikube-local-setup
